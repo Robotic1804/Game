@@ -204,6 +204,3 @@ Potential features that could be added:
 - Start menu
 - Game settings panel
 
-## Author
-
-Refactored with Claude Code
