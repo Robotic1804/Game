@@ -1,207 +1,473 @@
-// Canvas Related 
-const canvas = document.createElement('canvas');
-const context = canvas.getContext('2d');
-let paddleIndex = 0;
+// ========================================
+// CONFIGURATION
+// ========================================
+const CONFIG = {
+  canvas: {
+    width: 500,
+    height: 700,
+    backgroundColor: '#000000'
+  },
+  paddle: {
+    width: 50,
+    height: 10,
+    color: '#FFFFFF',
+    offset: 20,
+    player: 0,
+    computer: 1
+  },
+  ball: {
+    radius: 5,
+    color: '#FFFFFF',
+    initialSpeedY: 3,
+    maxSpeedY: 5,
+    speedIncrement: 1,
+    trajectoryMultiplier: 0.3
+  },
+  computer: {
+    initialSpeed: 4,
+    maxSpeed: 6,
+    speedIncrement: 0.5,
+    errorMargin: 5
+  },
+  game: {
+    winningScore: 5,
+    font: 'Courier New',
+    fontSize: {
+      score: 32,
+      title: 40,
+      subtitle: 20,
+      small: 16
+    }
+  },
+  colors: {
+    primary: '#FFFFFF',
+    secondary: '#888888',
+    accent: '#00FF00',
+    danger: '#FF0000',
+    particle: '#FFFFFF'
+  },
+  particles: {
+    count: 8,
+    maxLife: 30,
+    maxSpeed: 3
+  }
+};
 
-let width = 500;
-let height = 700;
+// ========================================
+// GAME STATES
+// ========================================
+const GameState = {
+  PLAYING: 'playing',
+  PAUSED: 'paused',
+  GAME_OVER: 'game_over'
+};
 
-// Paddle
-let paddleHeight = 10;
-let paddleWidth = 50;
-let paddleDiff = 25;
-let paddleX = [ 225, 225 ];
-let trajectoryX = [ 0, 0 ];
-let playerMoved = false;
+// ========================================
+// PARTICLE CLASS
+// ========================================
+class Particle {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.vx = (Math.random() - 0.5) * CONFIG.particles.maxSpeed;
+    this.vy = (Math.random() - 0.5) * CONFIG.particles.maxSpeed;
+    this.life = CONFIG.particles.maxLife;
+    this.maxLife = CONFIG.particles.maxLife;
+  }
 
-// Ball
-let ballX = 250;
-let ballY = 350;
-let ballRadius = 5;
-let ballDirection = 1;
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.life--;
+  }
 
-// Speed
-let speedY = 2;
-let speedX = 0;
-let computerSpeed = 4;
+  isAlive() {
+    return this.life > 0;
+  }
 
-// Score for Both Players
-let score = [ 0, 0 ];
-
-// Create Canvas Element
-function createCanvas() {
-  canvas.id = 'canvas';
-  canvas.width = width;
-  canvas.height = height;
-  document.body.appendChild(canvas);
-  renderCanvas();
-}
-
-// Wait for Opponents
-// function renderIntro() {
-//   // Canvas Background
-//   context.fillStyle = 'black';
-//   context.fillRect(0, 0, width, height);
-
-//   // Intro Text
-//   context.fillStyle = 'white';
-//   context.font = "32px Courier New";
-//   context.fillText("Waiting for opponent...", 20, (canvas.height / 2) - 30);
-// }
-
-// Render Everything on Canvas
-function renderCanvas() {
-  // Canvas Background
-  context.fillStyle = 'black';
-  context.fillRect(0, 0, width, height);
-
-  // Paddle Color
-  context.fillStyle = 'white';
-
-  // Bottom Paddle
-  context.fillRect(paddleX[0], height - 20, paddleWidth, paddleHeight);
-
-  // Top Paddle
-  context.fillRect(paddleX[1], 10, paddleWidth, paddleHeight);
-
-  // Dashed Center Line
-  context.beginPath();
-  context.setLineDash([4]);
-  context.moveTo(0, 350);
-  context.lineTo(500, 350);
-  context.strokeStyle = 'grey';
-  context.stroke();
-
-  // Ball
-  context.beginPath();
-  context.arc(ballX, ballY, ballRadius, 2 * Math.PI, false);
-  context.fillStyle = 'white';
-  context.fill();
-
-  // Score
-  context.font = "32px Courier New";
-  context.fillText(score[0], 20, (canvas.height / 2) + 50);
-  context.fillText(score[1], 20, (canvas.height / 2) - 30);
-}
-
-// Reset Ball to Center
-function ballReset() {
-  ballX = width / 2;
-  ballY = height / 2;
-  speedY = 3;
-}
-
-// Adjust Ball Movement
-function ballMove() {
-  // Vertical Speed
-  ballY += speedY * ballDirection;
-  // Horizontal Speed
-  if (playerMoved) {
-    ballX += speedX;
+  render(ctx) {
+    const alpha = this.life / this.maxLife;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = CONFIG.colors.particle;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 }
 
-// Determine What Ball Bounces Off, Score Points, Reset Ball
-function ballBoundaries() {
-  // Bounce off Left Wall
-  if (ballX < 0 && speedX < 0) {
-    speedX = -speedX;
+// ========================================
+// BALL CLASS
+// ========================================
+class Ball {
+  constructor() {
+    this.reset();
   }
-  // Bounce off Right Wall
-  if (ballX > width && speedX > 0) {
-    speedX = -speedX;
+
+  reset() {
+    this.x = CONFIG.canvas.width / 2;
+    this.y = CONFIG.canvas.height / 2;
+    this.speedY = CONFIG.ball.initialSpeedY;
+    this.speedX = 0;
+    this.direction = 1;
   }
-  // Bounce off player paddle (bottom)
-  if (ballY > height - paddleDiff) {
-    if (ballX >= paddleX[0] && ballX <= paddleX[0] + paddleWidth) {
-      // Add Speed on Hit
+
+  update(playerMoved) {
+    this.y += this.speedY * this.direction;
+    if (playerMoved) {
+      this.x += this.speedX;
+    }
+  }
+
+  checkWallCollision() {
+    if (this.x < CONFIG.ball.radius && this.speedX < 0) {
+      this.speedX = -this.speedX;
+      return true;
+    }
+    if (this.x > CONFIG.canvas.width - CONFIG.ball.radius && this.speedX > 0) {
+      this.speedX = -this.speedX;
+      return true;
+    }
+    return false;
+  }
+
+  checkPaddleCollision(paddle, playerMoved) {
+    const ballLeft = this.x;
+    const ballRight = this.x;
+    const paddleLeft = paddle.x;
+    const paddleRight = paddle.x + CONFIG.paddle.width;
+
+    if (ballLeft >= paddleLeft && ballRight <= paddleRight) {
       if (playerMoved) {
-        speedY += 1;
-        // Max Speed
-        if (speedY > 5) {
-          speedY = 5;
-        }
+        this.speedY = Math.min(
+          this.speedY + CONFIG.ball.speedIncrement,
+          CONFIG.ball.maxSpeedY
+        );
       }
-      ballDirection = -ballDirection;
-      trajectoryX[0] = ballX - (paddleX[0] + paddleDiff);
-      speedX = trajectoryX[0] * 0.3;
-    } else {
-      // Reset Ball, add to Computer Score
-      ballReset();
-      score[1]++;
+      this.direction = -this.direction;
+
+      const hitPosition = this.x - (paddle.x + CONFIG.paddle.width / 2);
+      this.speedX = hitPosition * CONFIG.ball.trajectoryMultiplier;
+
+      return true;
     }
+    return false;
   }
-  // Bounce off computer paddle (top)
-  if (ballY < paddleDiff) {
-    if (ballX >= paddleX[1] && ballX <= paddleX[1] + paddleWidth) {
-      // Add Speed on Hit
-      if (playerMoved) {
-        speedY += 1;
-        // Max Speed
-        if (speedY > 5) {
-          speedY = 5;
-        }
-      }
-      ballDirection = -ballDirection;
-      trajectoryX[1] = ballX - (paddleX[1] + paddleDiff);
-      speedX = trajectoryX[1] * 0.3;
-    } else {
-      // Reset Ball, Increase Computer Difficulty, add to Player Score
-      if (computerSpeed < 6) {
-        computerSpeed += 0.5;
-      }
-      ballReset();
-      score[0]++;
-    }
+
+  render(ctx) {
+    // Glow effect
+    ctx.save();
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = CONFIG.colors.primary;
+
+    ctx.fillStyle = CONFIG.ball.color;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, CONFIG.ball.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
   }
 }
 
-// Computer Movement
-function computerAI() {
-  if (playerMoved) {
-    if (paddleX[1] + paddleDiff < ballX) {
-      paddleX[1] += computerSpeed;
-    } else {
-      paddleX[1] -= computerSpeed;
+// ========================================
+// PADDLE CLASS
+// ========================================
+class Paddle {
+  constructor(isPlayer = true) {
+    this.isPlayer = isPlayer;
+    this.x = CONFIG.canvas.width / 2 - CONFIG.paddle.width / 2;
+    this.y = isPlayer ?
+      CONFIG.canvas.height - CONFIG.paddle.offset :
+      CONFIG.paddle.offset - CONFIG.paddle.height;
+    this.speed = CONFIG.computer.initialSpeed;
+  }
+
+  reset() {
+    this.x = CONFIG.canvas.width / 2 - CONFIG.paddle.width / 2;
+    this.speed = CONFIG.computer.initialSpeed;
+  }
+
+  moveTo(targetX) {
+    this.x = Math.max(0, Math.min(targetX, CONFIG.canvas.width - CONFIG.paddle.width));
+  }
+
+  updateAI(ballX, playerMoved) {
+    if (!playerMoved) return;
+
+    const targetX = ballX - CONFIG.paddle.width / 2;
+    const paddleCenter = this.x + CONFIG.paddle.width / 2;
+    const diff = targetX - paddleCenter;
+
+    if (Math.abs(diff) > CONFIG.computer.errorMargin) {
+      if (diff > 0) {
+        this.x += Math.min(this.speed, diff);
+      } else {
+        this.x += Math.max(-this.speed, diff);
+      }
     }
-    if (paddleX[1] < 0) {
-      paddleX[1] = 0;
-    } else if (paddleX[1] > (width - paddleWidth)) {
-      paddleX[1] = width - paddleWidth;
-    }
+
+    this.x = Math.max(0, Math.min(this.x, CONFIG.canvas.width - CONFIG.paddle.width));
+  }
+
+  increaseSpeed() {
+    this.speed = Math.min(this.speed + CONFIG.computer.speedIncrement, CONFIG.computer.maxSpeed);
+  }
+
+  render(ctx) {
+    ctx.save();
+    ctx.shadowBlur = 5;
+    ctx.shadowColor = CONFIG.colors.primary;
+
+    ctx.fillStyle = CONFIG.paddle.color;
+    ctx.fillRect(this.x, this.y, CONFIG.paddle.width, CONFIG.paddle.height);
+
+    ctx.restore();
   }
 }
 
-// Called Every Frame
-function animate() {
-  computerAI();
-  ballMove();
-  renderCanvas();
-  ballBoundaries();
-  window.requestAnimationFrame(animate);
+// ========================================
+// RENDERER CLASS
+// ========================================
+class Renderer {
+  constructor(canvas, ctx) {
+    this.canvas = canvas;
+    this.ctx = ctx;
+  }
+
+  clear() {
+    this.ctx.fillStyle = CONFIG.canvas.backgroundColor;
+    this.ctx.fillRect(0, 0, CONFIG.canvas.width, CONFIG.canvas.height);
+  }
+
+  drawCenterLine() {
+    this.ctx.save();
+    this.ctx.beginPath();
+    this.ctx.setLineDash([4, 4]);
+    this.ctx.moveTo(0, CONFIG.canvas.height / 2);
+    this.ctx.lineTo(CONFIG.canvas.width, CONFIG.canvas.height / 2);
+    this.ctx.strokeStyle = CONFIG.colors.secondary;
+    this.ctx.stroke();
+    this.ctx.restore();
+  }
+
+  drawScore(score) {
+    this.ctx.fillStyle = CONFIG.colors.primary;
+    this.ctx.font = `${CONFIG.game.fontSize.score}px ${CONFIG.game.font}`;
+    this.ctx.fillText(score[0], 20, CONFIG.canvas.height / 2 + 50);
+    this.ctx.fillText(score[1], 20, CONFIG.canvas.height / 2 - 30);
+  }
+
+  drawPauseScreen() {
+    this.ctx.save();
+
+    // Semi-transparent overlay
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    this.ctx.fillRect(0, 0, CONFIG.canvas.width, CONFIG.canvas.height);
+
+    // Pause text
+    this.ctx.fillStyle = CONFIG.colors.primary;
+    this.ctx.font = `${CONFIG.game.fontSize.title}px ${CONFIG.game.font}`;
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('PAUSED', CONFIG.canvas.width / 2, CONFIG.canvas.height / 2);
+
+    this.ctx.font = `${CONFIG.game.fontSize.small}px ${CONFIG.game.font}`;
+    this.ctx.fillText('Press ESC to resume', CONFIG.canvas.width / 2, CONFIG.canvas.height / 2 + 30);
+    this.ctx.fillText('Press R to restart', CONFIG.canvas.width / 2, CONFIG.canvas.height / 2 + 50);
+
+    this.ctx.textAlign = 'left';
+    this.ctx.restore();
+  }
+
+  drawGameOver(winner) {
+    this.ctx.save();
+
+    // Semi-transparent overlay
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    this.ctx.fillRect(0, 0, CONFIG.canvas.width, CONFIG.canvas.height);
+
+    // Winner text
+    this.ctx.fillStyle = winner === 'player' ? CONFIG.colors.accent : CONFIG.colors.danger;
+    this.ctx.font = `${CONFIG.game.fontSize.title}px ${CONFIG.game.font}`;
+    this.ctx.textAlign = 'center';
+
+    const winnerText = winner === 'player' ? 'YOU WIN!' : 'COMPUTER WINS!';
+    this.ctx.fillText(winnerText, CONFIG.canvas.width / 2, CONFIG.canvas.height / 2 - 20);
+
+    // Instructions
+    this.ctx.fillStyle = CONFIG.colors.primary;
+    this.ctx.font = `${CONFIG.game.fontSize.subtitle}px ${CONFIG.game.font}`;
+    this.ctx.fillText('Press R to play again', CONFIG.canvas.width / 2, CONFIG.canvas.height / 2 + 40);
+
+    this.ctx.textAlign = 'left';
+    this.ctx.restore();
+  }
+
+  drawParticles(particles) {
+    particles.forEach(particle => particle.render(this.ctx));
+  }
 }
 
-// Start Game, Reset Everything
-function startGame() {
-  createCanvas();
-  // renderIntro();
-  
-  paddleIndex = 0;
-  window.requestAnimationFrame(animate);
-  canvas.addEventListener('mousemove', (e) => {
-    playerMoved = true;
-    paddleX[paddleIndex] = e.offsetX;
-    if (paddleX[paddleIndex] < 0) {
-      paddleX[paddleIndex] = 0;
+// ========================================
+// GAME CLASS
+// ========================================
+class Game {
+  constructor() {
+    this.canvas = this.createCanvas();
+    this.ctx = this.canvas.getContext('2d');
+    this.renderer = new Renderer(this.canvas, this.ctx);
+
+    this.ball = new Ball();
+    this.playerPaddle = new Paddle(true);
+    this.computerPaddle = new Paddle(false);
+
+    this.score = [0, 0];
+    this.state = GameState.PLAYING;
+    this.playerMoved = false;
+    this.particles = [];
+
+    this.setupEventListeners();
+    this.animate();
+  }
+
+  createCanvas() {
+    const canvas = document.createElement('canvas');
+    canvas.id = 'canvas';
+    canvas.width = CONFIG.canvas.width;
+    canvas.height = CONFIG.canvas.height;
+    document.body.appendChild(canvas);
+    return canvas;
+  }
+
+  setupEventListeners() {
+    this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+    window.addEventListener('keydown', (e) => this.handleKeyPress(e));
+  }
+
+  handleMouseMove(e) {
+    if (this.state !== GameState.PLAYING) return;
+
+    this.playerMoved = true;
+    this.playerPaddle.moveTo(e.offsetX - CONFIG.paddle.width / 2);
+    this.canvas.style.cursor = 'none';
+  }
+
+  handleKeyPress(e) {
+    if (e.key === 'Escape' && this.state !== GameState.GAME_OVER) {
+      this.togglePause();
+    } else if (e.key === 'r' || e.key === 'R') {
+      this.reset();
     }
-    if (paddleX[paddleIndex] > (width - paddleWidth)) {
-      paddleX[paddleIndex] = width - paddleWidth;
+  }
+
+  togglePause() {
+    this.state = this.state === GameState.PAUSED ?
+      GameState.PLAYING : GameState.PAUSED;
+  }
+
+  reset() {
+    this.ball.reset();
+    this.playerPaddle.reset();
+    this.computerPaddle.reset();
+    this.score = [0, 0];
+    this.state = GameState.PLAYING;
+    this.playerMoved = false;
+    this.particles = [];
+    this.canvas.style.cursor = 'default';
+  }
+
+  createParticles(x, y) {
+    for (let i = 0; i < CONFIG.particles.count; i++) {
+      this.particles.push(new Particle(x, y));
     }
-    // Hide Cursor
-    canvas.style.cursor = 'none';
-  });
+  }
+
+  updateParticles() {
+    this.particles = this.particles.filter(particle => {
+      particle.update();
+      return particle.isAlive();
+    });
+  }
+
+  checkCollisions() {
+    // Wall collision
+    if (this.ball.checkWallCollision()) {
+      this.createParticles(this.ball.x, this.ball.y);
+    }
+
+    // Player paddle collision
+    const playerPaddleY = CONFIG.canvas.height - CONFIG.paddle.offset;
+    if (this.ball.y > playerPaddleY - CONFIG.paddle.height / 2) {
+      if (this.ball.checkPaddleCollision(this.playerPaddle, this.playerMoved)) {
+        this.createParticles(this.ball.x, this.ball.y);
+      } else if (this.ball.y > CONFIG.canvas.height) {
+        // Computer scores
+        this.score[1]++;
+        this.ball.reset();
+        this.checkWinner();
+      }
+    }
+
+    // Computer paddle collision
+    const computerPaddleY = CONFIG.paddle.offset;
+    if (this.ball.y < computerPaddleY + CONFIG.paddle.height / 2) {
+      if (this.ball.checkPaddleCollision(this.computerPaddle, this.playerMoved)) {
+        this.computerPaddle.increaseSpeed();
+        this.createParticles(this.ball.x, this.ball.y);
+      } else if (this.ball.y < 0) {
+        // Player scores
+        this.score[0]++;
+        this.ball.reset();
+        this.checkWinner();
+      }
+    }
+  }
+
+  checkWinner() {
+    if (this.score[0] >= CONFIG.game.winningScore) {
+      this.state = GameState.GAME_OVER;
+      this.winner = 'player';
+    } else if (this.score[1] >= CONFIG.game.winningScore) {
+      this.state = GameState.GAME_OVER;
+      this.winner = 'computer';
+    }
+  }
+
+  update() {
+    if (this.state !== GameState.PLAYING) return;
+
+    this.ball.update(this.playerMoved);
+    this.computerPaddle.updateAI(this.ball.x, this.playerMoved);
+    this.checkCollisions();
+    this.updateParticles();
+  }
+
+  render() {
+    this.renderer.clear();
+    this.renderer.drawCenterLine();
+    this.ball.render(this.ctx);
+    this.playerPaddle.render(this.ctx);
+    this.computerPaddle.render(this.ctx);
+    this.renderer.drawScore(this.score);
+    this.renderer.drawParticles(this.particles);
+
+    if (this.state === GameState.PAUSED) {
+      this.renderer.drawPauseScreen();
+    } else if (this.state === GameState.GAME_OVER) {
+      this.renderer.drawGameOver(this.winner);
+    }
+  }
+
+  animate() {
+    this.update();
+    this.render();
+    requestAnimationFrame(() => this.animate());
+  }
 }
 
-// On Load
-startGame();
-
+// ========================================
+// INITIALIZE GAME
+// ========================================
+window.addEventListener('DOMContentLoaded', () => {
+  new Game();
+});
